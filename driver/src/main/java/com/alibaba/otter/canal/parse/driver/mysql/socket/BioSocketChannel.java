@@ -1,5 +1,6 @@
 package com.alibaba.otter.canal.parse.driver.mysql.socket;
 
+import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -24,7 +25,7 @@ public class BioSocketChannel implements SocketChannel {
 
     BioSocketChannel(Socket socket) throws IOException{
         this.socket = socket;
-        this.input = socket.getInputStream();
+        this.input = new BufferedInputStream(socket.getInputStream(), 16384);
         this.output = socket.getOutputStream();
     }
 
@@ -93,6 +94,37 @@ public class BioSocketChannel implements SocketChannel {
         return data;
     }
 
+    @Override
+    public void read(byte[] data, int off, int len, int timeout) throws IOException {
+        InputStream input = this.input;
+        int accTimeout = 0;
+        if (input == null) {
+            throw new SocketException("Socket already closed.");
+        }
+
+        int n = 0;
+        while (n < len && accTimeout < timeout) {
+            try {
+                int read = input.read(data, off + n, len - n);
+                if (read > -1) {
+                    n += read;
+                } else {
+                    throw new IOException("EOF encountered.");
+                }
+            } catch (SocketTimeoutException te) {
+                if (Thread.interrupted()) {
+                    throw new ClosedByInterruptException();
+                }
+                accTimeout += SO_TIMEOUT;
+            }
+        }
+
+        if (n < len && accTimeout >= timeout) {
+            throw new SocketTimeoutException("Timeout occurred, failed to read " + len + " bytes in " + timeout
+                                             + " milliseconds.");
+        }
+    }
+
     public boolean isConnected() {
         Socket socket = this.socket;
         if (socket != null) {
@@ -106,6 +138,16 @@ public class BioSocketChannel implements SocketChannel {
         if (socket != null) {
             return socket.getRemoteSocketAddress();
         }
+
+        return null;
+    }
+
+    public SocketAddress getLocalSocketAddress() {
+        Socket socket = this.socket;
+        if (socket != null) {
+            return socket.getLocalSocketAddress();
+        }
+
         return null;
     }
 

@@ -19,9 +19,13 @@ import com.alibaba.otter.canal.common.AbstractCanalLifeCycle;
 import com.alibaba.otter.canal.common.alarm.CanalAlarmHandler;
 import com.alibaba.otter.canal.filter.CanalEventFilter;
 import com.alibaba.otter.canal.parse.CanalEventParser;
+import com.alibaba.otter.canal.parse.driver.mysql.packets.GTIDSet;
+import com.alibaba.otter.canal.parse.driver.mysql.packets.MysqlGTIDSet;
 import com.alibaba.otter.canal.parse.exception.CanalParseException;
+import com.alibaba.otter.canal.parse.exception.PositionNotFoundException;
 import com.alibaba.otter.canal.parse.exception.TableIdNotFoundException;
 import com.alibaba.otter.canal.parse.inbound.EventTransactionBuffer.TransactionFlushCallback;
+import com.alibaba.otter.canal.parse.inbound.mysql.MysqlMultiStageCoprocessor;
 import com.alibaba.otter.canal.parse.index.CanalLogPositionManager;
 import com.alibaba.otter.canal.parse.support.AuthenticationInfo;
 import com.alibaba.otter.canal.protocol.CanalEntry;
@@ -87,9 +91,20 @@ public abstract class AbstractEventParser<EVENT> extends AbstractCanalLifeCycle 
     protected TimerTask                              heartBeatTimerTask;
     protected Throwable                              exception                  = null;
 
+    protected boolean                                isGTIDMode                 = false;                                   // 是否是GTID模式
+    protected boolean                                parallel                   = true;                                    // 是否开启并行解析模式
+    protected Integer                                parallelThreadSize         = Runtime.getRuntime()
+                                                                                    .availableProcessors() * 60 / 100;     // 60%的能力跑解析,剩余部分处理网络
+    protected int                                    parallelBufferSize         = 256;                                     // 必须为2的幂
+    protected MultiStageCoprocessor                  multiStageCoprocessor;
+    protected ParserExceptionHandler                 parserExceptionHandler;
+    protected long                                   serverId;
+
     protected abstract BinlogParser buildParser();
 
     protected abstract ErosaConnection buildErosaConnection();
+
+    protected abstract MultiStageCoprocessor buildMultiStageCoprocessor();
 
     protected abstract EntryPosition findStartPosition(ErosaConnection connection) throws IOException;
 
@@ -160,11 +175,16 @@ public abstract class AbstractEventParser<EVENT> extends AbstractCanalLifeCycle 
                         preDump(erosaConnection);
 
                         erosaConnection.connect();// 链接
+
+                        long queryServerId = erosaConnection.queryServerId();
+                        if (queryServerId != 0) {
+                            serverId = queryServerId;
+                        }
                         // 4. 获取最后的位置信息
                         EntryPosition position = findStartPosition(erosaConnection);
                         final EntryPosition startPosition = position;
                         if (startPosition == null) {
-                            throw new CanalParseException("can't find start position for " + destination);
+                            throw new PositionNotFoundException("can't find start position for " + destination);
                         }
 
                         if (!processTableMeta(startPosition)) {
@@ -214,14 +234,41 @@ public abstract class AbstractEventParser<EVENT> extends AbstractCanalLifeCycle 
                         };
 
                         // 4. 开始dump数据
-                        if (StringUtils.isEmpty(startPosition.getJournalName()) && startPosition.getTimestamp() != null) {
-                            erosaConnection.dump(startPosition.getTimestamp(), sinkHandler);
+                        if (parallel) {
+                            // build stage processor
+                            multiStageCoprocessor = buildMultiStageCoprocessor();
+                            if (isGTIDMode()) {
+                                // 判断所属instance是否启用GTID模式，是的话调用ErosaConnection中GTID对应方法dump数据
+                                GTIDSet gtidSet = MysqlGTIDSet.parse(startPosition.getGtid());
+                                ((MysqlMultiStageCoprocessor) multiStageCoprocessor).setGtidSet(gtidSet);
+                                multiStageCoprocessor.start();
+                                erosaConnection.dump(gtidSet, multiStageCoprocessor);
+                            } else {
+                                multiStageCoprocessor.start();
+                                if (StringUtils.isEmpty(startPosition.getJournalName())
+                                    && startPosition.getTimestamp() != null) {
+                                    erosaConnection.dump(startPosition.getTimestamp(), multiStageCoprocessor);
+                                } else {
+                                    erosaConnection.dump(startPosition.getJournalName(),
+                                        startPosition.getPosition(),
+                                        multiStageCoprocessor);
+                                }
+                            }
                         } else {
-                            erosaConnection.dump(startPosition.getJournalName(),
-                                startPosition.getPosition(),
-                                sinkHandler);
+                            if (isGTIDMode()) {
+                                // 判断所属instance是否启用GTID模式，是的话调用ErosaConnection中GTID对应方法dump数据
+                                erosaConnection.dump(MysqlGTIDSet.parse(startPosition.getGtid()), sinkHandler);
+                            } else {
+                                if (StringUtils.isEmpty(startPosition.getJournalName())
+                                    && startPosition.getTimestamp() != null) {
+                                    erosaConnection.dump(startPosition.getTimestamp(), sinkHandler);
+                                } else {
+                                    erosaConnection.dump(startPosition.getJournalName(),
+                                        startPosition.getPosition(),
+                                        sinkHandler);
+                                }
+                            }
                         }
-
                     } catch (TableIdNotFoundException e) {
                         exception = e;
                         // 特殊处理TableIdNotFound异常,出现这样的异常，一种可能就是起始的position是一个事务当中，导致tablemap
@@ -241,6 +288,9 @@ public abstract class AbstractEventParser<EVENT> extends AbstractCanalLifeCycle 
                             logger.error(String.format("dump address %s has an error, retrying. caused by ",
                                 runningInfo.getAddress().toString()), e);
                             sendAlarm(destination, ExceptionUtils.getFullStackTrace(e));
+                        }
+                        if (parserExceptionHandler != null) {
+                            parserExceptionHandler.handle(e);
                         }
                     } finally {
                         // 重新置为中断状态
@@ -267,6 +317,14 @@ public abstract class AbstractEventParser<EVENT> extends AbstractCanalLifeCycle 
                     eventSink.interrupt();
                     transactionBuffer.reset();// 重置一下缓冲队列，重新记录数据
                     binlogParser.reset();// 重新置位
+                    if (multiStageCoprocessor != null) {
+                        // 处理 RejectedExecutionException
+                        try {
+                            multiStageCoprocessor.reset();
+                        } catch (Throwable t) {
+                            logger.debug("multi processor rejected:", t);
+                        }
+                    }
 
                     if (running) {
                         // sleep一段时间再进行重试
@@ -293,6 +351,11 @@ public abstract class AbstractEventParser<EVENT> extends AbstractCanalLifeCycle 
         stopHeartBeat(); // 先停止心跳
         parseThread.interrupt(); // 尝试中断
         eventSink.interrupt();
+
+        if (multiStageCoprocessor != null && multiStageCoprocessor.isStart()) {
+            multiStageCoprocessor.stop();
+        }
+
         try {
             parseThread.join();// 等待其结束
         } catch (InterruptedException e) {
@@ -368,6 +431,9 @@ public abstract class AbstractEventParser<EVENT> extends AbstractCanalLifeCycle 
         position.setTimestamp(entry.getHeader().getExecuteTime());
         // add serverId at 2016-06-28
         position.setServerId(entry.getHeader().getServerId());
+        // set gtid
+        position.setGtid(entry.getHeader().getGtid());
+
         logPosition.setPostion(position);
 
         LogIdentity identity = new LogIdentity(runningInfo.getAddress(), -1L);
@@ -375,7 +441,7 @@ public abstract class AbstractEventParser<EVENT> extends AbstractCanalLifeCycle 
         return logPosition;
     }
 
-    protected void processSinkError(Throwable e, LogPosition lastPosition, String startBinlogFile, long startPosition) {
+    protected void processSinkError(Throwable e, LogPosition lastPosition, String startBinlogFile, Long startPosition) {
         if (lastPosition != null) {
             logger.warn(String.format("ERROR ## parse this event has an error , last position : [%s]",
                 lastPosition.getPostion()),
@@ -528,6 +594,56 @@ public abstract class AbstractEventParser<EVENT> extends AbstractCanalLifeCycle 
 
     public Throwable getException() {
         return exception;
+    }
+
+    public boolean isGTIDMode() {
+        return isGTIDMode;
+    }
+
+    public void setIsGTIDMode(boolean isGTIDMode) {
+        this.isGTIDMode = isGTIDMode;
+    }
+
+    public boolean isParallel() {
+        return parallel;
+    }
+
+    public void setParallel(boolean parallel) {
+        this.parallel = parallel;
+    }
+
+    public int getParallelThreadSize() {
+        return parallelThreadSize;
+    }
+
+    public void setParallelThreadSize(Integer parallelThreadSize) {
+        if (parallelThreadSize != null) {
+            this.parallelThreadSize = parallelThreadSize;
+        }
+    }
+
+    public Integer getParallelBufferSize() {
+        return parallelBufferSize;
+    }
+
+    public void setParallelBufferSize(int parallelBufferSize) {
+        this.parallelBufferSize = parallelBufferSize;
+    }
+
+    public ParserExceptionHandler getParserExceptionHandler() {
+        return parserExceptionHandler;
+    }
+
+    public void setParserExceptionHandler(ParserExceptionHandler parserExceptionHandler) {
+        this.parserExceptionHandler = parserExceptionHandler;
+    }
+
+    public long getServerId() {
+        return serverId;
+    }
+
+    public void setServerId(long serverId) {
+        this.serverId = serverId;
     }
 
 }

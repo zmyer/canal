@@ -2,6 +2,8 @@ package com.alibaba.otter.canal.parse.inbound;
 
 import java.io.IOException;
 
+import com.alibaba.otter.canal.parse.driver.mysql.packets.GTIDSet;
+
 /**
  * 通用的Erosa的链接接口, 用于一般化处理mysql/oracle的解析过程
  * 
@@ -24,5 +26,20 @@ public interface ErosaConnection {
 
     public void dump(long timestamp, SinkFunction func) throws IOException;
 
+    /**
+     * 通过GTID同步binlog
+     */
+    public void dump(GTIDSet gtidSet, SinkFunction func) throws IOException;
+
+    // -------------
+
+    public void dump(String binlogfilename, Long binlogPosition, MultiStageCoprocessor coprocessor) throws IOException;
+
+    public void dump(long timestamp, MultiStageCoprocessor coprocessor) throws IOException;
+
+    public void dump(GTIDSet gtidSet, MultiStageCoprocessor coprocessor) throws IOException;
+
     ErosaConnection fork();
+
+    public long queryServerId() throws IOException;
 }

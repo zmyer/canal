@@ -15,9 +15,13 @@ public interface SocketChannel {
 
     public byte[] read(int readSize, int timeout) throws IOException;
 
+    public void read(byte[] data, int off, int len, int timeout) throws IOException;
+
     public boolean isConnected();
 
     public SocketAddress getRemoteSocketAddress();
+
+    public SocketAddress getLocalSocketAddress();
 
     public void close();
 }

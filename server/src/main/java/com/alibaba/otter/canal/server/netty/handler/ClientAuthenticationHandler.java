@@ -34,7 +34,7 @@ public class ClientAuthenticationHandler extends SimpleChannelHandler {
 
     private static final Logger     logger                                  = LoggerFactory.getLogger(ClientAuthenticationHandler.class);
     private final int               SUPPORTED_VERSION                       = 3;
-    private final int               defaultSubscriptorDisconnectIdleTimeout = 5 * 60 * 1000;
+    private final int               defaultSubscriptorDisconnectIdleTimeout = 60 * 60 * 1000;
     private CanalServerWithEmbedded embeddedServer;
 
     public ClientAuthenticationHandler(){
@@ -73,7 +73,7 @@ public class ClientAuthenticationHandler extends SimpleChannelHandler {
                         MDC.remove("destination");
                     }
                 }
-
+                // 鉴权一次性，暂不统计
                 NettyUtils.ack(ctx.getChannel(), new ChannelFutureListener() {
 
                     public void operationComplete(ChannelFuture future) throws Exception {

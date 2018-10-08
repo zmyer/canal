@@ -11,6 +11,7 @@ import io.netty.util.internal.SystemPropertyUtil;
 import java.io.IOException;
 import java.net.SocketAddress;
 
+import org.apache.commons.lang.NotImplementedException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -202,12 +203,21 @@ public class NettySocketChannel implements SocketChannel {
         } while (true);
     }
 
+    @Override
+    public void read(byte[] data, int off, int len, int timeout) throws IOException {
+        throw new NotImplementedException();
+    }
+
     public boolean isConnected() {
         return channel != null ? true : false;
     }
 
     public SocketAddress getRemoteSocketAddress() {
         return channel != null ? channel.remoteAddress() : null;
+    }
+
+    public SocketAddress getLocalSocketAddress() {
+        return channel != null ? channel.localAddress() : null;
     }
 
     public void close() {
@@ -223,5 +233,6 @@ public class NettySocketChannel implements SocketChannel {
             cache = null;
         }
     }
+
 
 }

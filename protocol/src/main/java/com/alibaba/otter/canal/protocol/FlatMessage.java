@@ -1,7 +1,12 @@
 package com.alibaba.otter.canal.protocol;
 
 import java.io.Serializable;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import com.google.protobuf.ByteString;
 
@@ -18,6 +23,9 @@ public class FlatMessage implements Serializable {
     private String                    table;
     private Boolean                   isDdl;
     private String                    type;
+    // binlog executeTime
+    private Long                      es;
+    // dml build timeStamp
     private Long                      ts;
     private String                    sql;
     private Map<String, Integer>      sqlType;
@@ -120,6 +128,14 @@ public class FlatMessage implements Serializable {
         this.old = old;
     }
 
+    public Long getEs() {
+        return es;
+    }
+
+    public void setEs(Long es) {
+        this.es = es;
+    }
+
     /**
      * 将Message转换为FlatMessage
      * 
@@ -133,11 +149,19 @@ public class FlatMessage implements Serializable {
             }
 
             List<FlatMessage> flatMessages = new ArrayList<>();
+            List<CanalEntry.Entry> entrys = null;
+            if (message.isRaw()) {
+                List<ByteString> rawEntries = message.getRawEntries();
+                entrys = new ArrayList<CanalEntry.Entry>(rawEntries.size());
+                for (ByteString byteString : rawEntries) {
+                    CanalEntry.Entry entry = CanalEntry.Entry.parseFrom(byteString);
+                    entrys.add(entry);
+                }
+            } else {
+                entrys = message.getEntries();
+            }
 
-            List<ByteString> rawEntries = message.getRawEntries();
-
-            for (ByteString byteString : rawEntries) {
-                CanalEntry.Entry entry = CanalEntry.Entry.parseFrom(byteString);
+            for (CanalEntry.Entry entry : entrys) {
                 if (entry.getEntryType() == CanalEntry.EntryType.TRANSACTIONBEGIN
                     || entry.getEntryType() == CanalEntry.EntryType.TRANSACTIONEND) {
                     continue;
@@ -160,6 +184,7 @@ public class FlatMessage implements Serializable {
                 flatMessage.setTable(entry.getHeader().getTableName());
                 flatMessage.setIsDdl(rowChange.getIsDdl());
                 flatMessage.setType(eventType.toString());
+                flatMessage.setEs(entry.getHeader().getExecuteTime());
                 flatMessage.setTs(System.currentTimeMillis());
                 flatMessage.setSql(rowChange.getSql());
 
@@ -188,7 +213,11 @@ public class FlatMessage implements Serializable {
                         for (CanalEntry.Column column : columns) {
                             sqlType.put(column.getName(), column.getSqlType());
                             mysqlType.put(column.getName(), column.getMysqlType());
-                            row.put(column.getName(), column.getValue());
+                            if (column.getIsNull()) {
+                                row.put(column.getName(), null);
+                            } else {
+                                row.put(column.getName(), column.getValue());
+                            }
                             // 获取update为true的字段
                             if (column.getUpdated()) {
                                 updateSet.add(column.getName());
@@ -202,7 +231,11 @@ public class FlatMessage implements Serializable {
                             Map<String, String> rowOld = new LinkedHashMap<>();
                             for (CanalEntry.Column column : rowData.getBeforeColumnsList()) {
                                 if (updateSet.contains(column.getName())) {
-                                    rowOld.put(column.getName(), column.getValue());
+                                    if (column.getIsNull()) {
+                                        rowOld.put(column.getName(), null);
+                                    } else {
+                                        rowOld.put(column.getName(), column.getValue());
+                                    }
                                 }
                             }
                             // update操作将记录修改前的值
@@ -245,7 +278,6 @@ public class FlatMessage implements Serializable {
             partitionsNum = 1;
         }
         FlatMessage[] partitionMessages = new FlatMessage[partitionsNum];
-
         String pk = pkHashConfig.get(flatMessage.getDatabase() + "." + flatMessage.getTable());
         if (pk == null || flatMessage.getIsDdl()) {
             partitionMessages[0] = flatMessage;
@@ -253,7 +285,17 @@ public class FlatMessage implements Serializable {
             if (flatMessage.getData() != null) {
                 int idx = 0;
                 for (Map<String, String> row : flatMessage.getData()) {
-                    String value = row.get(pk);
+                    Map<String, String> o = null;
+                    if (flatMessage.getOld() != null) {
+                        o = flatMessage.getOld().get(idx);
+                    }
+                    String value;
+                    // 如果old中有pk值说明主键有修改, 以旧的主键值hash为准
+                    if (o != null && o.containsKey(pk)) {
+                        value = o.get(pk);
+                    } else {
+                        value = row.get(pk);
+                    }
                     if (value == null) {
                         value = "";
                     }
@@ -273,6 +315,8 @@ public class FlatMessage implements Serializable {
                         flatMessageTmp.setSql(flatMessage.getSql());
                         flatMessageTmp.setSqlType(flatMessage.getSqlType());
                         flatMessageTmp.setMysqlType(flatMessage.getMysqlType());
+                        flatMessageTmp.setEs(flatMessage.getEs());
+                        flatMessageTmp.setTs(flatMessage.getTs());
                     }
                     List<Map<String, String>> data = flatMessageTmp.getData();
                     if (data == null) {
@@ -297,8 +341,8 @@ public class FlatMessage implements Serializable {
 
     @Override
     public String toString() {
-        return "FlatMessage{" + "id=" + id + ", database='" + database + '\'' + ", table='" + table + '\'' + ", isDdl="
-               + isDdl + ", type='" + type + '\'' + ", ts=" + ts + ", sql='" + sql + '\'' + ", sqlType=" + sqlType
-               + ", mysqlType=" + mysqlType + ", data=" + data + ", old=" + old + '}';
+        return "FlatMessage [id=" + id + ", database=" + database + ", table=" + table + ", isDdl=" + isDdl + ", type="
+               + type + ", es=" + es + ", ts=" + ts + ", sql=" + sql + ", sqlType=" + sqlType + ", mysqlType="
+               + mysqlType + ", data=" + data + ", old=" + old + "]";
     }
 }

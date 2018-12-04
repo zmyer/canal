@@ -44,7 +44,7 @@ canal 1.1.x系列，参考release文档：<a href="https://github.com/alibaba/ca
 
 1. 整体性能测试&优化,提升了150%. #726 参考: 【[Performance](https://github.com/alibaba/canal/wiki/Performance)】
 2. 原生支持prometheus监控 #765 【[Prometheus QuickStart](https://github.com/alibaba/canal/wiki/Prometheus-QuickStart)】
-3. 原生支持kafka消息投递 #695 【[Canal Kafka QuickStart](https://github.com/alibaba/canal/wiki/Canal-Kafka-QuickStart)】
+3. 原生支持kafka消息投递 #695 【[Canal Kafka/RocketMQ QuickStart](https://github.com/alibaba/canal/wiki/Canal-Kafka-RocketMQ-QuickStart)】
 4. 原生支持aliyun rds的binlog订阅 (解决自动主备切换/oss binlog离线解析) 参考: 【[Aliyun RDS QuickStart](https://github.com/alibaba/canal/wiki/aliyun-RDS-QuickStart)】
 5. 原生支持docker镜像 #801 参考:  【[Docker QuickStart](https://github.com/alibaba/canal/wiki/Docker-QuickStart)】
 
@@ -60,7 +60,7 @@ See the wiki page for : <a href="https://github.com/alibaba/canal/wiki" >wiki文
 <a class="internal present" href="https://github.com/alibaba/canal/wiki/QuickStart">QuickStart</a>
 <ul>
 <li><a class="internal present" href="https://github.com/alibaba/canal/wiki/Docker-QuickStart">Docker QuickStart</a></li>
-<li><a class="internal present" href="https://github.com/alibaba/canal/wiki/Canal-Kafka-QuickStart">Canal Kafka QuickStart</a></li>
+<li><a class="internal present" href="https://github.com/alibaba/canal/wiki/Canal-Kafka-RocketMQ-QuickStart">Canal Kafka/RocketMQ QuickStart</a></li>
 <li><a class="internal present" href="https://github.com/alibaba/canal/wiki/aliyun-RDS-QuickStart">Aliyun RDS QuickStart</a></li>
 <li><a class="internal present" href="https://github.com/alibaba/canal/wiki/Prometheus-QuickStart">Prometheus QuickStart</a></li>
 </ul>
@@ -82,14 +82,15 @@ See the wiki page for : <a href="https://github.com/alibaba/canal/wiki" >wiki文
 
 1. canal整体交互协议设计上使用了protobuf3.0，理论上可以支持绝大部分的多语言场景，欢迎大家提交多客户端的PR
     * canal java客户端: <a href="https://github.com/alibaba/canal/wiki/ClientExample"> https://github.com/alibaba/canal/wiki/ClientExample </a>
-    * canal c#客户端开源项目地址：<a href="https://github.com/CanalSharp/CanalSharp"> https://github.com/CanalSharp/CanalSharp </a>
-    * canal go客户端，开发进行中
+    * canal c#客户端开源项目地址：<a href="https://github.com/CanalClient/CanalSharp"> https://github.com/CanalSharp/CanalSharp </a>
+    * canal go客户端开源项目地址：<a href="https://github.com/CanalClient/canal-go"> https://github.com/CanalClient/canal-go </a>
 2. canal作为MySQL binlog的增量获取工具，可以将数据投递到MQ系统中，比如Kafka/RocketMQ，可以借助于MQ的多语言能力 
+    * 参考文档: [Canal Kafka/RocketMQ QuickStart](https://github.com/alibaba/canal/wiki/Canal-Kafka-RocketMQ-QuickStart)
 
 <h1>相关资料</h1>
 
 * ADC阿里技术嘉年华分享ppt (放在google docs上，可能需要翻墙): <a href="https://docs.google.com/presentation/d/1MkszUPYRDkfVPz9IqOT1LLT5d9tuwde_WC8GZvjaDRg/edit?usp=sharing">ppt下载</href>  
-* [与阿里巴巴的RocketMQ配合使用](https://github.com/alibaba/RocketMQ)
+* [与阿里巴巴的RocketMQ配合使用](https://github.com/apache/RocketMQ)
 
 <h1>相关开源</h1>
 <ol>
@@ -116,7 +117,7 @@ See the wiki page for : <a href="https://github.com/alibaba/canal/wiki" >wiki文
 <h3>最新更新</h3>
 <ol>
 <li>canal发布重大版本更新1.1.0，具体releaseNode参考：<a href="https://github.com/alibaba/canal/releases/tag/canal-1.1.0">https://github.com/alibaba/canal/releases/tag/canal-1.1.0</a></li>
-<li>canal c#客户端开源项目地址：<a href="https://github.com/CanalSharp/CanalSharp"> https://github.com/CanalSharp/CanalSharp </a>，推荐! </li>
+<li>canal c#客户端开源项目地址：<a href="https://github.com/CanalClient/CanalSharp"> https://github.com/CanalClient/CanalSharp </a>，推荐! </li>
 <li>canal QQ讨论群已经建立，群号：161559791 ，欢迎加入进行技术讨论。</li>
 <li>canal消费端项目开源: Otter(分布式数据库同步系统)，地址：<a href="https://github.com/alibaba/otter">https://github.com/alibaba/otter</a></li>
 
